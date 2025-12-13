@@ -1,0 +1,2 @@
+redecanais=https://redecanais.do/
+superflixapi=https://superflixapi.run/
