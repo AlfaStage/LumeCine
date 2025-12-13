@@ -1,30 +1,89 @@
-![REFLUX](https://raw.githubusercontent.com/Nightfruit/reflux/main/public/images/banner.png)
-
 # LumeCine - Addon para Stremio
 
-O LumeCine é um addon para Stremio que permite aos usuários acessar um enorme catálogo de filmes e séries, oferecendo uma maneira rápida e fácil de assistir onde quer que você esteja!
+O LumeCine é um addon para Stremio que permite acessar um enorme catálogo de filmes e séries de múltiplos provedores de streaming.
 
-## Instalação
+## 🎬 Provedores Disponíveis
 
-Para instalar o addon LumeCine, basta adicionar o seguinte link aos seus addons do Stremio:
+| Provedor | Status | Descrição |
+|----------|--------|-----------|
+| **RedeCanais** | ✅ Ativo | Filmes e séries dublados/legendados |
+| **SuperflixAPI** | ✅ Ativo | Streaming via TMDB/IMDB IDs |
+| **Vizer** | 🔜 Em breve | Catálogo adicional |
 
-`https://rx.postclub.me/manifest.json`
+## 🚀 Instalação em Servidor (VPS)
 
-## Funcionalidades
+### Requisitos
+- VPS com Ubuntu 20.04+ (ou similar)
+- Mínimo 1GB RAM
+- Domínio apontando para o IP do servidor
 
-* Acesso a um enorme conteúdo da **Rede Canais**, **Vizer (em breve)** e vários sites!
-* Aproveite uma forma simples e prática de assistir suas séries e filmes favoritos.
+### Instalação Automática (Um comando)
 
-## Contribuindo
+```bash
+curl -fsSL https://raw.githubusercontent.com/AlfaStage/LumeCine/main/install.sh | sudo bash
+```
 
-Contribuições para melhorar o LumeCine são muito bem-vindas! Se quiser ajudar, fique à vontade para abrir uma issue ou pull request. Você também pode ajudar reportando bugs, sugerindo novos recursos ou enviando feedback.
+ou
 
-## Relato de Problemas
+```bash
+wget -qO- https://raw.githubusercontent.com/AlfaStage/LumeCine/main/install.sh | sudo bash
+```
 
-Se encontrar algum bug, problema com conteúdo ou tiver outras preocupações, sinta-se à vontade para entrar em contato. Você pode falar diretamente comigo pelo Instagram em [@mrsev7en](https://www.instagram.com/mrsev7en).
+O script irá:
+- Detectar seu sistema operacional
+- Perguntar as configurações necessárias (domínio, chave TMDB, etc.)
+- Instalar todas as dependências (Node.js, Docker, PostgreSQL, Nginx, PM2)
+- Configurar SSL automático com Let's Encrypt
+- Iniciar a aplicação
 
-Agradeço pelo apoio e qualquer feedback para ajudar a melhorar o addon!
+### Instalação Manual
 
-## Licença
+```bash
+# 1. Clonar repositório
+git clone https://github.com/AlfaStage/LumeCine.git
+cd LumeCine
 
-Este projeto está licenciado sob a Licença MIT — veja o arquivo [LICENSE](https://github.com/Nightfruit/lumecine/blob/main/LICENSE) para mais detalhes.
+# 2. Copiar e configurar .env
+cp .env.example .env
+nano .env
+
+# 3. Instalar dependências
+npm install
+
+# 4. Configurar banco de dados
+npx prisma generate
+npx prisma db push
+
+# 5. Build e iniciar
+npm run build
+npm run start:prod
+```
+
+## ⚙️ Variáveis de Ambiente
+
+| Variável | Obrigatório | Descrição |
+|----------|-------------|-----------|
+| `APP_PORT` | Sim | Porta da aplicação (padrão: 3000) |
+| `APP_URL` | Sim | URL pública (ex: https://lumecine.example.com) |
+| `DATABASE_URL` | Sim | String de conexão PostgreSQL |
+| `TMDB_KEY` | Sim | Chave da API TMDB |
+| `OMDB_KEY` | Não | Chave da API OMDB (limite: 1000/dia) |
+| `PROVIDERS_URL` | Não | URL com configuração dos provedores |
+
+## 📱 Uso no Stremio
+
+Após a instalação, adicione o addon no Stremio com a URL:
+
+```
+https://seu-dominio.com/manifest.json
+```
+
+## 🙏 Créditos
+
+Este projeto é um fork do **[Reflux](https://github.com/Nightfruit/reflux)** criado por [@mrsev7en](https://github.com/mrsev7en).
+
+Agradecimentos especiais ao trabalho original que tornou este projeto possível.
+
+## 📄 Licença
+
+Este projeto está licenciado sob a Licença MIT — veja o arquivo [LICENSE](LICENSE) para mais detalhes.

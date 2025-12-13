@@ -84,6 +84,29 @@ OMDB_KEY=""
 PROVIDERS_URL="https://raw.githubusercontent.com/AlfaStage/LumeCine/refs/heads/main/PROVIDERS_URL.txt"
 SERVER_IP=""
 
+# Estado da instalação
+STATE_FILE="/opt/lumecine/.install_state"
+LOCK_FILE="/tmp/lumecine_install.lock"
+CURRENT_STEP=""
+RESUME_MODE=false
+
+# Lista de etapas na ordem de execução
+STEPS=(
+    "update_system"
+    "setup_swap"
+    "install_nodejs"
+    "install_docker"
+    "install_nginx"
+    "install_pm2"
+    "install_certbot"
+    "setup_database"
+    "install_lumecine"
+    "configure_nginx"
+    "setup_ssl"
+    "setup_pm2"
+    "setup_firewall"
+)
+
 #===============================================================================
 # FUNÇÕES DE UTILIDADE
 #===============================================================================
@@ -142,6 +165,286 @@ get_server_ip() {
 
 generate_password() {
     tr -dc 'A-Za-z0-9!@#$%^&*' </dev/urandom | head -c 32
+}
+
+#===============================================================================
+# GERENCIAMENTO DE ESTADO E LOCK
+#===============================================================================
+
+# Verificar se há outra instância rodando
+check_lock() {
+    if [ -f "$LOCK_FILE" ]; then
+        LOCK_PID=$(cat "$LOCK_FILE" 2>/dev/null)
+        if [ -n "$LOCK_PID" ] && kill -0 "$LOCK_PID" 2>/dev/null; then
+            log_error "Outra instalação está em andamento (PID: $LOCK_PID)"
+            log_info "Se você tem certeza que não há outra instalação, remova: $LOCK_FILE"
+            exit 1
+        else
+            log_warning "Lock file encontrado mas processo não está rodando. Limpando..."
+            rm -f "$LOCK_FILE"
+        fi
+    fi
+    
+    # Criar lock file
+    echo $$ > "$LOCK_FILE"
+    trap "rm -f $LOCK_FILE" EXIT
+}
+
+# Salvar estado atual
+save_state() {
+    local step="$1"
+    local status="$2"  # "started" ou "completed"
+    
+    mkdir -p "$(dirname "$STATE_FILE")"
+    
+    # Carregar estado existente ou criar novo
+    if [ -f "$STATE_FILE" ]; then
+        source "$STATE_FILE"
+    fi
+    
+    # Atualizar estado
+    cat > "$STATE_FILE" << EOF
+# LumeCine Install State - Não edite manualmente
+LAST_RUN="$(date '+%Y-%m-%d %H:%M:%S')"
+CURRENT_STEP="$step"
+STEP_STATUS="$status"
+APP_DOMAIN="${APP_DOMAIN}"
+APP_PORT="${APP_PORT}"
+DB_USER="${DB_USER}"
+DB_NAME="${DB_NAME}"
+DB_PASS="${DB_PASS}"
+TMDB_KEY="${TMDB_KEY}"
+OMDB_KEY="${OMDB_KEY}"
+EOF
+}
+
+# Carregar estado anterior
+load_state() {
+    if [ -f "$STATE_FILE" ]; then
+        source "$STATE_FILE"
+        return 0
+    fi
+    return 1
+}
+
+# Verificar se uma etapa foi concluída
+is_step_completed() {
+    local step="$1"
+    
+    case "$step" in
+        "update_system")
+            # Verificar se build-essential está instalado
+            command -v gcc &>/dev/null
+            ;;
+        "setup_swap")
+            # Verificar se swap existe ou se RAM é suficiente
+            [ "$(swapon --show | wc -l)" -gt 0 ] || [ "$TOTAL_MEM" -ge 2048 ]
+            ;;
+        "install_nodejs")
+            command -v node &>/dev/null && [ "$(node -v | cut -d'v' -f2 | cut -d'.' -f1)" -ge "$NODE_VERSION" ]
+            ;;
+        "install_docker")
+            command -v docker &>/dev/null && systemctl is-active --quiet docker
+            ;;
+        "install_nginx")
+            command -v nginx &>/dev/null && systemctl is-active --quiet nginx
+            ;;
+        "install_pm2")
+            command -v pm2 &>/dev/null
+            ;;
+        "install_certbot")
+            command -v certbot &>/dev/null
+            ;;
+        "setup_database")
+            docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^lumecine-db$"
+            ;;
+        "install_lumecine")
+            [ -d "$INSTALL_DIR" ] && [ -f "$INSTALL_DIR/.env" ] && [ -d "$INSTALL_DIR/dist" ]
+            ;;
+        "configure_nginx")
+            [ -f "/etc/nginx/sites-available/lumecine" ]
+            ;;
+        "setup_ssl")
+            [ -d "/etc/letsencrypt/live/$APP_DOMAIN" ] 2>/dev/null || true
+            ;;
+        "setup_pm2")
+            pm2 list 2>/dev/null | grep -q "lumecine"
+            ;;
+        "setup_firewall")
+            # Firewall é opcional, sempre retorna true
+            true
+            ;;
+        *)
+            false
+            ;;
+    esac
+}
+
+# Verificar instalação anterior e perguntar o que fazer
+check_previous_installation() {
+    log_step "Verificando Instalação Anterior"
+    
+    local has_previous=false
+    local completed_steps=()
+    local incomplete_step=""
+    
+    # Verificar cada etapa
+    for step in "${STEPS[@]}"; do
+        if is_step_completed "$step"; then
+            completed_steps+=("$step")
+            has_previous=true
+        else
+            if [ -z "$incomplete_step" ]; then
+                incomplete_step="$step"
+            fi
+        fi
+    done
+    
+    if [ "$has_previous" = true ]; then
+        echo -e "${YELLOW}═══════════════════════════════════════════════════════════════════${NC}"
+        echo -e "${WHITE}${BOLD}  📋 INSTALAÇÃO ANTERIOR DETECTADA${NC}"
+        echo -e "${YELLOW}═══════════════════════════════════════════════════════════════════${NC}"
+        echo ""
+        
+        echo -e "${GREEN}Etapas concluídas:${NC}"
+        for step in "${completed_steps[@]}"; do
+            echo -e "  ${GREEN}✓${NC} $step"
+        done
+        
+        if [ -n "$incomplete_step" ]; then
+            echo ""
+            echo -e "${YELLOW}Próxima etapa:${NC} $incomplete_step"
+        fi
+        
+        echo ""
+        
+        # Carregar configurações anteriores se existirem
+        if load_state; then
+            echo -e "${CYAN}Configurações salvas:${NC}"
+            echo -e "  Domínio: ${APP_DOMAIN:-não definido}"
+            echo -e "  Porta: ${APP_PORT:-3000}"
+            echo ""
+        fi
+        
+        echo -e "${WHITE}O que deseja fazer?${NC}"
+        echo -e "  ${CYAN}1${NC}) Continuar de onde parou"
+        echo -e "  ${CYAN}2${NC}) Reinstalar tudo do zero"
+        echo -e "  ${CYAN}3${NC}) Verificar e corrigir instalação"
+        echo -e "  ${CYAN}4${NC}) Cancelar"
+        echo ""
+        
+        read -p "Escolha [1-4]: " CHOICE
+        
+        case "$CHOICE" in
+            1)
+                RESUME_MODE=true
+                log_success "Continuando instalação de: $incomplete_step"
+                ;;
+            2)
+                log_warning "Limpando instalação anterior..."
+                cleanup_installation
+                RESUME_MODE=false
+                ;;
+            3)
+                verify_and_fix_installation
+                ;;
+            4)
+                log_info "Instalação cancelada"
+                exit 0
+                ;;
+            *)
+                log_error "Opção inválida"
+                exit 1
+                ;;
+        esac
+    else
+        log_info "Nenhuma instalação anterior detectada"
+    fi
+}
+
+# Limpar instalação anterior
+cleanup_installation() {
+    log_info "Parando serviços..."
+    pm2 delete lumecine 2>/dev/null || true
+    docker stop lumecine-db 2>/dev/null || true
+    docker rm lumecine-db 2>/dev/null || true
+    
+    log_info "Removendo arquivos..."
+    rm -rf "$INSTALL_DIR"
+    rm -f /etc/nginx/sites-available/lumecine
+    rm -f /etc/nginx/sites-enabled/lumecine
+    rm -f "$STATE_FILE"
+    
+    log_success "Instalação anterior limpa"
+}
+
+# Verificar e corrigir instalação
+verify_and_fix_installation() {
+    log_step "Verificando e Corrigindo Instalação"
+    
+    local needs_fix=false
+    
+    for step in "${STEPS[@]}"; do
+        if is_step_completed "$step"; then
+            echo -e "  ${GREEN}✓${NC} $step - OK"
+        else
+            echo -e "  ${RED}✗${NC} $step - Precisa correção"
+            needs_fix=true
+            
+            # Tentar executar a etapa
+            read -p "    Executar $step agora? (s/n): " FIX_STEP
+            if [[ "$FIX_STEP" =~ ^[SsYy]$ ]]; then
+                $step
+                if is_step_completed "$step"; then
+                    echo -e "    ${GREEN}✓${NC} Corrigido!"
+                else
+                    echo -e "    ${RED}✗${NC} Falha ao corrigir"
+                fi
+            fi
+        fi
+    done
+    
+    if [ "$needs_fix" = false ]; then
+        log_success "Todas as etapas estão corretas!"
+        
+        # Verificar se aplicação está rodando
+        if pm2 list 2>/dev/null | grep -q "lumecine"; then
+            if pm2 list 2>/dev/null | grep "lumecine" | grep -q "online"; then
+                log_success "Aplicação está rodando!"
+                get_server_ip
+                echo ""
+                echo -e "${GREEN}URL do Addon:${NC} https://${APP_DOMAIN}/manifest.json"
+            else
+                log_warning "Aplicação não está online. Reiniciando..."
+                pm2 restart lumecine
+            fi
+        fi
+        
+        exit 0
+    fi
+}
+
+# Função wrapper para executar etapa com estado
+run_step() {
+    local step="$1"
+    
+    # Se em modo resume, pular etapas já concluídas
+    if [ "$RESUME_MODE" = true ] && is_step_completed "$step"; then
+        echo -e "${BLUE}[SKIP]${NC} $step - Já concluído"
+        return 0
+    fi
+    
+    save_state "$step" "started"
+    
+    # Executar a etapa
+    if $step; then
+        save_state "$step" "completed"
+        return 0
+    else
+        log_error "Falha na etapa: $step"
+        save_state "$step" "failed"
+        return 1
+    fi
 }
 
 #===============================================================================
@@ -334,9 +637,9 @@ collect_user_data() {
     echo -e "  ${BLUE}DB Name:${NC}      ${DB_NAME}"
     echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
     
-    read -p "Confirmar e iniciar instalação? (s/n): " CONFIRM
+    read -p "Confirmar e iniciar instalação? (s/y): " CONFIRM
     
-    if [[ ! "$CONFIRM" =~ ^[Ss]$ ]]; then
+    if [[ ! "$CONFIRM" =~ ^[SsYy]$ ]]; then
         log_error "Instalação cancelada pelo usuário"
         exit 1
     fi
@@ -371,6 +674,37 @@ update_system() {
     esac
     
     log_success "Sistema atualizado"
+}
+
+setup_swap() {
+    log_step "Configurando Memória SWAP"
+    
+    # Verificar se já existe swap
+    if [ "$(swapon --show | wc -l)" -gt 0 ]; then
+        log_success "SWAP já está configurado"
+        return
+    fi
+    
+    # Verificar se memória é baixa (menos de 2GB)
+    if [ "$TOTAL_MEM" -ge 2048 ]; then
+        log_info "Memória RAM suficiente, SWAP não necessário"
+        return
+    fi
+    
+    log_info "Criando arquivo SWAP de 2GB (necessário para compilação)..."
+    
+    # Criar arquivo swap
+    fallocate -l 2G /swapfile 2>/dev/null || dd if=/dev/zero of=/swapfile bs=1M count=2048 status=progress
+    chmod 600 /swapfile
+    mkswap /swapfile
+    swapon /swapfile
+    
+    # Adicionar ao fstab para persistência
+    if ! grep -q "/swapfile" /etc/fstab; then
+        echo '/swapfile none swap sw 0 0' >> /etc/fstab
+    fi
+    
+    log_success "SWAP de 2GB configurado"
 }
 
 install_nodejs() {
@@ -598,8 +932,8 @@ EOF
     log_success "Arquivo .env criado"
     
     # Instalar dependências
-    log_info "Instalando dependências do Node.js..."
-    npm install --silent
+    log_info "Instalando dependências do Node.js (pode demorar alguns minutos)..."
+    npm install --loglevel=error
     
     # Gerar Prisma Client
     log_info "Gerando Prisma Client..."
@@ -869,29 +1203,48 @@ EOF
 main() {
     print_banner
     check_root
+    check_lock
     
     # Fase 1: Detecção
     detect_os
     detect_existing_services
     
-    # Fase 2: Coleta de dados
-    collect_user_data
+    # Fase 1.5: Verificar instalação anterior
+    check_previous_installation
+    
+    # Fase 2: Coleta de dados (somente se não estiver resumindo com dados salvos)
+    if [ "$RESUME_MODE" = true ] && [ -n "$APP_DOMAIN" ] && [ -n "$TMDB_KEY" ]; then
+        log_info "Usando configurações salvas da instalação anterior"
+        echo -e "  Domínio: ${APP_DOMAIN}"
+        echo -e "  TMDB Key: ${TMDB_KEY:0:10}..."
+        echo ""
+        read -p "Usar estas configurações? (s/n): " USE_SAVED
+        if [[ ! "$USE_SAVED" =~ ^[SsYy]$ ]]; then
+            collect_user_data
+        fi
+    else
+        collect_user_data
+    fi
     
     # Fase 3: Instalação
-    update_system
-    install_nodejs
-    install_docker
-    install_nginx
-    install_pm2
-    install_certbot
+    run_step update_system
+    run_step setup_swap
+    run_step install_nodejs
+    run_step install_docker
+    run_step install_nginx
+    run_step install_pm2
+    run_step install_certbot
     
     # Fase 4: Configuração
-    setup_database
-    install_lumecine
-    configure_nginx
-    setup_ssl
-    setup_pm2
-    setup_firewall
+    run_step setup_database
+    run_step install_lumecine
+    run_step configure_nginx
+    run_step setup_ssl
+    run_step setup_pm2
+    run_step setup_firewall
+    
+    # Marcar instalação como completa
+    save_state "complete" "completed"
     
     # Fase 5: Finalização
     print_summary
