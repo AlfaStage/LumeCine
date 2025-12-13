@@ -16,6 +16,33 @@
 #
 #===============================================================================
 
+#===============================================================================
+# DETECÇÃO DE PIPE - Se executado via curl | bash, baixa e re-executa
+#===============================================================================
+if [ ! -t 0 ]; then
+    # Stdin não é um terminal (executando via pipe)
+    SCRIPT_URL="https://raw.githubusercontent.com/AlfaStage/LumeCine/main/install.sh"
+    TEMP_SCRIPT="/tmp/lumecine_install_$$.sh"
+    
+    echo "Detectado execução via pipe. Baixando script para execução interativa..."
+    
+    # Baixar script para arquivo temporário
+    if command -v curl &> /dev/null; then
+        curl -fsSL "$SCRIPT_URL" -o "$TEMP_SCRIPT"
+    elif command -v wget &> /dev/null; then
+        wget -qO "$TEMP_SCRIPT" "$SCRIPT_URL"
+    else
+        echo "Erro: curl ou wget não encontrado!"
+        exit 1
+    fi
+    
+    chmod +x "$TEMP_SCRIPT"
+    
+    # Re-executar o script interativamente
+    exec bash "$TEMP_SCRIPT" "$@"
+    exit $?
+fi
+
 set -e
 
 #===============================================================================
