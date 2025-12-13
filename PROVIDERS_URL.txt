@@ -1,2 +1,2 @@
-redecanais=https://redecanais.do/
+redecanais=https://redecanais.bh/
 superflixapi=https://superflixapi.run/
