@@ -22,7 +22,7 @@
 if [ ! -t 0 ]; then
     # Stdin não é um terminal (executando via pipe)
     SCRIPT_URL="https://raw.githubusercontent.com/AlfaStage/LumeCine/main/install.sh"
-    TEMP_SCRIPT="/tmp/lumecine_install_$$.sh"
+    TEMP_SCRIPT="/tmp/lumecine_install.sh"
     
     echo "Detectado execução via pipe. Baixando script para execução interativa..."
     
@@ -38,9 +38,8 @@ if [ ! -t 0 ]; then
     
     chmod +x "$TEMP_SCRIPT"
     
-    # Re-executar o script interativamente
-    exec bash "$TEMP_SCRIPT" "$@"
-    exit $?
+    # Re-executar o script com o terminal como stdin
+    exec bash "$TEMP_SCRIPT" "$@" < /dev/tty
 fi
 
 set -e
