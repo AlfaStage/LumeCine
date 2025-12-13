@@ -19,8 +19,8 @@
 #===============================================================================
 # DETECÇÃO DE PIPE - Se executado via curl | bash, baixa e re-executa
 #===============================================================================
-if [ ! -t 0 ]; then
-    # Stdin não é um terminal (executando via pipe)
+if [ -z "$LUMECINE_REEXEC" ] && [ ! -t 0 ]; then
+    # Stdin não é um terminal (executando via pipe) e ainda não foi re-executado
     SCRIPT_URL="https://raw.githubusercontent.com/AlfaStage/LumeCine/main/install.sh"
     TEMP_SCRIPT="/tmp/lumecine_install.sh"
     
@@ -38,7 +38,8 @@ if [ ! -t 0 ]; then
     
     chmod +x "$TEMP_SCRIPT"
     
-    # Re-executar o script com o terminal como stdin
+    # Re-executar o script com o terminal como stdin e marcar como re-executado
+    export LUMECINE_REEXEC=1
     exec bash "$TEMP_SCRIPT" "$@" < /dev/tty
 fi
 
