@@ -242,9 +242,51 @@ export class ProvidersService implements OnModuleInit {
   public async getMovieStreams(
     movie: DelegateMovieProperties,
   ): Promise<MovieStream[]> {
-    return await this.prismaService.movieStream.findMany({
+    const streams: MovieStream[] = [];
+
+    // First, get existing streams from database
+    const existingStreams = await this.prismaService.movieStream.findMany({
       where: { movieId: movie.id },
     });
+    streams.push(...existingStreams);
+
+    // Then check if we need to generate streams for on-demand providers
+    for (const provider of this.getProviders()) {
+      // Skip if we already have a stream from this provider
+      const hasStreamFromProvider = streams.some(
+        (s) => s.provider === provider.type,
+      );
+      if (hasStreamFromProvider) continue;
+
+      // Try to generate a stream from this provider (on-demand)
+      try {
+        const url = await provider.refreshMovieUrl(
+          movie,
+          Audio.DUBBED,
+          Quality.UNKNOWN,
+        );
+
+        if (url) {
+          // Create a stream entry in the database
+          const newStream = await this.prismaService.movieStream.create({
+            data: {
+              provider: provider.type,
+              refreshUrl: String(movie.id),
+              accessUrl: url,
+              audio: Audio.DUBBED,
+              quality: Quality.UNKNOWN,
+              movieId: movie.id,
+              expiresAt: new Date(Date.now() + 3600000), // 1 hour
+            },
+          });
+          streams.push(newStream);
+        }
+      } catch {
+        // Provider doesn't support this movie, skip silently
+      }
+    }
+
+    return streams;
   }
 
   public async getSeriesStreams(
