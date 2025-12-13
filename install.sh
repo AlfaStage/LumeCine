@@ -19,28 +19,38 @@
 #===============================================================================
 # DETECÇÃO DE PIPE - Se executado via curl | bash, baixa e re-executa
 #===============================================================================
-if [ -z "$LUMECINE_REEXEC" ] && [ ! -t 0 ]; then
-    # Stdin não é um terminal (executando via pipe) e ainda não foi re-executado
-    SCRIPT_URL="https://raw.githubusercontent.com/AlfaStage/LumeCine/main/install.sh"
-    TEMP_SCRIPT="/tmp/lumecine_install.sh"
-    
-    echo "Detectado execução via pipe. Baixando script para execução interativa..."
-    
-    # Baixar script para arquivo temporário
-    if command -v curl &> /dev/null; then
-        curl -fsSL "$SCRIPT_URL" -o "$TEMP_SCRIPT"
-    elif command -v wget &> /dev/null; then
-        wget -qO "$TEMP_SCRIPT" "$SCRIPT_URL"
-    else
-        echo "Erro: curl ou wget não encontrado!"
-        exit 1
+
+# Verificar se já foi re-executado (flag passada como argumento)
+if [[ "$1" == "--reexecuted" ]]; then
+    shift  # Remove o argumento --reexecuted
+else
+    # Verificar se stdin não é um terminal (executando via pipe)
+    if [ ! -t 0 ]; then
+        SCRIPT_URL="https://raw.githubusercontent.com/AlfaStage/LumeCine/main/install.sh"
+        TEMP_SCRIPT="/tmp/lumecine_install.sh"
+        
+        echo ""
+        echo "════════════════════════════════════════════════════════════════"
+        echo "  Detectado execução via pipe."
+        echo "  Baixando script para execução interativa..."
+        echo "════════════════════════════════════════════════════════════════"
+        echo ""
+        
+        # Baixar script para arquivo temporário
+        if command -v curl &> /dev/null; then
+            curl -fsSL "$SCRIPT_URL" -o "$TEMP_SCRIPT"
+        elif command -v wget &> /dev/null; then
+            wget -qO "$TEMP_SCRIPT" "$SCRIPT_URL"
+        else
+            echo "Erro: curl ou wget não encontrado!"
+            exit 1
+        fi
+        
+        chmod +x "$TEMP_SCRIPT"
+        
+        # Re-executar o script com flag e terminal como stdin
+        exec bash "$TEMP_SCRIPT" --reexecuted "$@" </dev/tty
     fi
-    
-    chmod +x "$TEMP_SCRIPT"
-    
-    # Re-executar o script com o terminal como stdin e marcar como re-executado
-    export LUMECINE_REEXEC=1
-    exec bash "$TEMP_SCRIPT" "$@" < /dev/tty
 fi
 
 set -e
