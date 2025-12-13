@@ -21,15 +21,17 @@ export type DelegateGenres = Prisma.MovieGenreDelegate &
 @Injectable()
 export class TmdbService implements OnModuleInit {
   private readonly logger = new Logger(TmdbService.name);
-  private readonly api = axios.create({
-    baseURL: API_URL,
-    headers: { authorization: `Bearer ${this.envService.get('TMDB_KEY')}` },
-  });
+  private readonly api;
 
   public constructor(
     private readonly envService: EnvService,
     private readonly prismaService: PrismaService,
-  ) {}
+  ) {
+    this.api = axios.create({
+      baseURL: API_URL,
+      headers: { authorization: `Bearer ${this.envService.get('TMDB_KEY')}` },
+    });
+  }
 
   public async onModuleInit(): Promise<void> {
     const isSessionValid = await this.validateKey();
