@@ -3,6 +3,7 @@ import { NlpProcessingService } from '@/modules/nlp/services/processing.service'
 import { PrismaService } from '@/modules/prisma/prisma.service';
 import { ProvidersRegistryService } from '@/modules/providers/services/registry.service';
 import { ProvidersTrendingService } from '@/modules/providers/services/trending.service';
+import { TmdbService } from '@/modules/tmdb/tmdb.service';
 import { ContentType, TrendingType } from '@/modules/tmdb/types/tmdb';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import {
@@ -69,6 +70,7 @@ export class ProvidersService implements OnModuleInit {
     private readonly prismaService: PrismaService,
     private readonly nlpProcessingService: NlpProcessingService,
     private readonly providersTrendingService: ProvidersTrendingService,
+    private readonly tmdbService: TmdbService,
   ) {}
 
   public async onModuleInit(): Promise<void> {
@@ -92,17 +94,95 @@ export class ProvidersService implements OnModuleInit {
   }
 
   public async getMovie(id: number): Promise<DelegateMovieProperties> {
-    return await this.prismaService.movie.findFirst({
+    // First, try to find in database
+    let movie = await this.prismaService.movie.findFirst({
       where: { id },
       include: { genres: true },
     });
+
+    // If not found, fetch from TMDB and create on-demand
+    if (!movie) {
+      this.logger.log(`Movie ${id} not in database, fetching from TMDB...`);
+      const tmdbMovie = await this.tmdbService.getMovieDetails(id);
+
+      if (tmdbMovie) {
+        // Create genres first (upsert to handle existing ones)
+        for (const genre of tmdbMovie.genres) {
+          await this.prismaService.movieGenre.upsert({
+            where: { id: genre.id },
+            create: { id: genre.id, name: genre.name },
+            update: {},
+          });
+        }
+
+        // Create the movie
+        movie = await this.prismaService.movie.create({
+          data: {
+            id: tmdbMovie.id,
+            title: tmdbMovie.title,
+            description: tmdbMovie.overview,
+            thumbnail: tmdbMovie.backdrop_path,
+            poster: tmdbMovie.poster_path,
+            rating: tmdbMovie.vote_average,
+            releasedAt: new Date(tmdbMovie.release_date),
+            genres: {
+              connect: tmdbMovie.genres.map((g) => ({ id: g.id })),
+            },
+          },
+          include: { genres: true },
+        });
+
+        this.logger.log(`Movie ${id} created on-demand: ${movie.title}`);
+      }
+    }
+
+    return movie;
   }
 
   public async getSeries(id: number): Promise<DelegateSeriesProperties> {
-    return await this.prismaService.series.findFirst({
+    // First, try to find in database
+    let series = await this.prismaService.series.findFirst({
       where: { id },
       include: { genres: true },
     });
+
+    // If not found, fetch from TMDB and create on-demand
+    if (!series) {
+      this.logger.log(`Series ${id} not in database, fetching from TMDB...`);
+      const tmdbSeries = await this.tmdbService.getSeriesDetails(id);
+
+      if (tmdbSeries) {
+        // Create genres first (upsert to handle existing ones)
+        for (const genre of tmdbSeries.genres) {
+          await this.prismaService.seriesGenre.upsert({
+            where: { id: genre.id },
+            create: { id: genre.id, name: genre.name },
+            update: {},
+          });
+        }
+
+        // Create the series
+        series = await this.prismaService.series.create({
+          data: {
+            id: tmdbSeries.id,
+            title: tmdbSeries.name,
+            description: tmdbSeries.overview,
+            thumbnail: tmdbSeries.backdrop_path,
+            poster: tmdbSeries.poster_path,
+            rating: tmdbSeries.vote_average,
+            releasedAt: new Date(tmdbSeries.first_air_date),
+            genres: {
+              connect: tmdbSeries.genres.map((g) => ({ id: g.id })),
+            },
+          },
+          include: { genres: true },
+        });
+
+        this.logger.log(`Series ${id} created on-demand: ${series.title}`);
+      }
+    }
+
+    return series;
   }
 
   public async getMovieList(options?: {

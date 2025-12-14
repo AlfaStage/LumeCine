@@ -157,6 +157,86 @@ export class TmdbService implements OnModuleInit {
     }
   }
 
+  /**
+   * Get movie details from TMDB API
+   */
+  public async getMovieDetails(movieId: number): Promise<{
+    id: number;
+    title: string;
+    overview: string;
+    backdrop_path: string;
+    poster_path: string;
+    vote_average: number;
+    release_date: string;
+    genres: { id: number; name: string }[];
+  } | null> {
+    try {
+      const uri = `movie/${movieId}?language=pt-BR`;
+      const { status, data } = await this.api.get(uri);
+
+      if (status === 200) {
+        return {
+          id: data.id,
+          title: data.title,
+          overview: data.overview || '',
+          backdrop_path: data.backdrop_path
+            ? `${IMAGE_URL}${data.backdrop_path}`
+            : '',
+          poster_path: data.poster_path
+            ? `${IMAGE_URL}${data.poster_path}`
+            : '',
+          vote_average: data.vote_average || 0,
+          release_date: data.release_date || '1970-01-01',
+          genres: data.genres || [],
+        };
+      }
+      return null;
+    } catch (error) {
+      this.logger.error(`Failed to get movie details: ${error.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Get series details from TMDB API
+   */
+  public async getSeriesDetails(seriesId: number): Promise<{
+    id: number;
+    name: string;
+    overview: string;
+    backdrop_path: string;
+    poster_path: string;
+    vote_average: number;
+    first_air_date: string;
+    genres: { id: number; name: string }[];
+  } | null> {
+    try {
+      const uri = `tv/${seriesId}?language=pt-BR`;
+      const { status, data } = await this.api.get(uri);
+
+      if (status === 200) {
+        return {
+          id: data.id,
+          name: data.name,
+          overview: data.overview || '',
+          backdrop_path: data.backdrop_path
+            ? `${IMAGE_URL}${data.backdrop_path}`
+            : '',
+          poster_path: data.poster_path
+            ? `${IMAGE_URL}${data.poster_path}`
+            : '',
+          vote_average: data.vote_average || 0,
+          first_air_date: data.first_air_date || '1970-01-01',
+          genres: data.genres || [],
+        };
+      }
+      return null;
+    } catch (error) {
+      this.logger.error(`Failed to get series details: ${error.message}`);
+      return null;
+    }
+  }
+
   private formatSearch(
     data: Search<SearchMovie & SearchTv>,
   ): (SearchMovie & SearchTv)[] {
