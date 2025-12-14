@@ -8,11 +8,14 @@ import {
   BadRequestException,
   Controller,
   Get,
+  Header,
   Param,
   Res,
 } from '@nestjs/common';
 import { MovieStream, SeriesStream } from '@prisma/client';
 import { Response } from 'express';
+
+const SUPERFLIX_BASE_URL = 'https://superflixapi.run';
 
 @Controller('/stream')
 export class StreamController {
@@ -112,6 +115,53 @@ export class StreamController {
     return { streams: await this.stremioService.getStreams(streams) };
   }
 
+  /**
+   * Embed endpoint - serves an HTML page with SuperflixAPI iframe
+   * This is used for Stremio Web player compatibility
+   */
+  @Get('/embed/movie/:imdbId')
+  @Header('Content-Type', 'text/html')
+  public async embedMovie(@Param('imdbId') imdbId: string) {
+    const embedUrl = `${SUPERFLIX_BASE_URL}/filme/${imdbId}`;
+    return this.generateEmbedHtml(embedUrl, 'Filme');
+  }
+
+  @Get('/embed/series/:tmdbId/:season/:episode')
+  @Header('Content-Type', 'text/html')
+  public async embedSeries(
+    @Param('tmdbId') tmdbId: string,
+    @Param('season') season: string,
+    @Param('episode') episode: string,
+  ) {
+    const embedUrl = `${SUPERFLIX_BASE_URL}/serie/${tmdbId}/${season}/${episode}`;
+    return this.generateEmbedHtml(embedUrl, 'Série');
+  }
+
+  private generateEmbedHtml(embedUrl: string, type: string): string {
+    return `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>LumeCine - ${type}</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; background: #000; overflow: hidden; }
+    iframe { width: 100%; height: 100%; border: none; }
+  </style>
+</head>
+<body>
+  <iframe 
+    src="${embedUrl}" 
+    allow="autoplay; encrypted-media; picture-in-picture; fullscreen" 
+    allowfullscreen
+    frameborder="0"
+    scrolling="no">
+  </iframe>
+</body>
+</html>`;
+  }
+
   @Get('/watch/:id')
   public async watchStream(@Param('id') id: string, @Res() res: Response) {
     const stream = await this.providersService.getStream(id);
@@ -135,8 +185,13 @@ export class StreamController {
         asMovie.quality,
       );
 
-      const proxied = `${this.envService.get('PROXY_URL')}?url=${encodeURIComponent(url)}`;
-      return res.status(302).redirect(proxied);
+      // If no proxy configured, redirect directly to the URL
+      const proxyUrl = this.envService.get('PROXY_URL');
+      if (proxyUrl) {
+        const proxied = `${proxyUrl}?url=${encodeURIComponent(url)}`;
+        return res.status(302).redirect(proxied);
+      }
+      return res.status(302).redirect(url);
     }
 
     if (isSeries) {
@@ -149,8 +204,13 @@ export class StreamController {
         asSeries.audio,
       );
 
-      const proxied = `${this.envService.get('PROXY_URL')}?url=${encodeURIComponent(url)}`;
-      return res.status(302).redirect(proxied);
+      // If no proxy configured, redirect directly to the URL
+      const proxyUrl = this.envService.get('PROXY_URL');
+      if (proxyUrl) {
+        const proxied = `${proxyUrl}?url=${encodeURIComponent(url)}`;
+        return res.status(302).redirect(proxied);
+      }
+      return res.status(302).redirect(url);
     }
 
     throw new BadRequestException();

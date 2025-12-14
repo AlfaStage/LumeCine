@@ -1,6 +1,5 @@
+import { EnvService } from '@/modules/env/env.service';
 import { TmdbService } from '@/modules/tmdb/tmdb.service';
-import { MOVIE_URL } from '@/providers/superflixapi/constants/url';
-import { SuperflixApiService } from '@/providers/superflixapi/services/api.service';
 import { Injectable, Logger } from '@nestjs/common';
 
 @Injectable()
@@ -8,14 +7,14 @@ export class SuperflixMovieSourcesService {
   private readonly logger = new Logger(SuperflixMovieSourcesService.name);
 
   public constructor(
-    private readonly apiService: SuperflixApiService,
+    private readonly envService: EnvService,
     private readonly tmdbService: TmdbService,
   ) {}
 
   /**
    * Build a stream URL for a movie.
    * SuperflixAPI uses IMDB IDs for movies, so we need to fetch the IMDB ID from TMDB first.
-   * Returns the direct player URL (like the reference stremio-superflix-addon project).
+   * Returns an embed URL hosted by LumeCine that contains the SuperflixAPI iframe.
    */
   public async build(tmdbId: number): Promise<string | null> {
     try {
@@ -26,10 +25,12 @@ export class SuperflixMovieSourcesService {
         return null;
       }
 
-      // Return the direct player URL (Stremio will handle the player)
-      const playerUrl = `${this.apiService.url}${MOVIE_URL}/${imdbId}`;
-      this.logger.log(`Generated stream URL for TMDB ${tmdbId}: ${playerUrl}`);
-      return playerUrl;
+      // Return the LumeCine embed URL (which serves an HTML page with SuperflixAPI iframe)
+      const appUrl =
+        this.envService.get('APP_URL') || 'https://lumecine.qzz.io';
+      const embedUrl = `${appUrl}/stream/embed/movie/${imdbId}`;
+      this.logger.log(`Generated embed URL for TMDB ${tmdbId}: ${embedUrl}`);
+      return embedUrl;
     } catch (error) {
       this.logger.error(`Failed to build movie stream URL: ${error.message}`);
       return null;
