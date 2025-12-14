@@ -201,14 +201,84 @@ export class ProvidersTrendingService implements OnModuleInit {
       .for(trendings)
       .process(async ({ type, trending, data }) => {
         const model = this.tmdbService.convertMediaContentType(type);
-        const found = await model.findFirst({
+        let found = await model.findFirst({
           where: { id: data.id },
           include: { genres: true },
         });
 
+        // If not found in database, create from TMDB data
         if (!found) {
-          return;
+          try {
+            if (type === ContentType.MOVIE) {
+              // Create movie from trending data
+              const movieData = data as SearchMovie;
+              const genreIds = movieData.genre_ids || [];
+
+              // Ensure genres exist
+              for (const genreId of genreIds) {
+                await this.tmdbService.convertGenreContentType(type).upsert({
+                  where: { id: genreId },
+                  create: { id: genreId, name: `Genre ${genreId}` },
+                  update: {},
+                });
+              }
+
+              found = await model.create({
+                data: {
+                  id: movieData.id,
+                  title: movieData.title || 'Unknown',
+                  description: movieData.overview || '',
+                  thumbnail: movieData.backdrop_path || '',
+                  poster: movieData.poster_path || '',
+                  rating: movieData.vote_average || 0,
+                  releasedAt: movieData.release_date
+                    ? new Date(movieData.release_date)
+                    : new Date('1970-01-01'),
+                  genres: {
+                    connect: genreIds.map((id) => ({ id })),
+                  },
+                },
+                include: { genres: true },
+              });
+            } else if (type === ContentType.TV) {
+              // Create series from trending data
+              const seriesData = data as SearchTv;
+              const genreIds = seriesData.genre_ids || [];
+
+              // Ensure genres exist
+              for (const genreId of genreIds) {
+                await this.tmdbService.convertGenreContentType(type).upsert({
+                  where: { id: genreId },
+                  create: { id: genreId, name: `Genre ${genreId}` },
+                  update: {},
+                });
+              }
+
+              found = await model.create({
+                data: {
+                  id: seriesData.id,
+                  title: seriesData.name || 'Unknown',
+                  description: seriesData.overview || '',
+                  thumbnail: seriesData.backdrop_path || '',
+                  poster: seriesData.poster_path || '',
+                  rating: seriesData.vote_average || 0,
+                  releasedAt: seriesData.first_air_date
+                    ? new Date(seriesData.first_air_date)
+                    : new Date('1970-01-01'),
+                  genres: {
+                    connect: genreIds.map((id) => ({ id })),
+                  },
+                },
+                include: { genres: true },
+              });
+            }
+          } catch {
+            // Failed to create, skip this item
+            return;
+          }
         }
+
+        if (!found) return;
 
         if (type === ContentType.MOVIE) {
           this.trendingMovies.set(
