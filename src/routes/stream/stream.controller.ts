@@ -2,6 +2,7 @@ import { EnvService } from '@/modules/env/env.service';
 import { ProvidersService } from '@/modules/providers/providers.service';
 import { ProvidersTrendingService } from '@/modules/providers/services/trending.service';
 import { StremioService } from '@/modules/stremio/stremio.service';
+import { TmdbService } from '@/modules/tmdb/tmdb.service';
 import { ContentType } from '@/modules/tmdb/types/tmdb';
 import {
   BadRequestException,
@@ -20,6 +21,7 @@ export class StreamController {
     private readonly providersService: ProvidersService,
     private readonly providersTrendingService: ProvidersTrendingService,
     private readonly stremioService: StremioService,
+    private readonly tmdbService: TmdbService,
   ) {}
 
   @Get('/:category/lumecine:params.json')
@@ -58,6 +60,56 @@ export class StreamController {
     return {
       streams: await this.stremioService.getStreams(streams),
     };
+  }
+
+  /**
+   * Handle streams for IMDB IDs (Cinemeta catalog)
+   * Format: movie -> tt1234567, series -> tt1234567:1:1 (for S01E01)
+   */
+  @Get('/:type/:id.json')
+  public async getStreamByImdb(
+    @Param('type') type: string,
+    @Param('id') id: string,
+  ) {
+    // Skip if not an IMDB ID
+    if (!id.startsWith('tt')) {
+      return { streams: [] };
+    }
+
+    const imdbId = id.split(':')[0]; // For series: tt123:1:1 -> tt123
+    const contentType = type === 'movie' ? ContentType.MOVIE : ContentType.TV;
+
+    // Convert IMDB ID to TMDB ID
+    const tmdbId = await this.tmdbService.findByImdbId(imdbId, contentType);
+
+    if (!tmdbId) {
+      return { streams: [] };
+    }
+
+    if (contentType === ContentType.MOVIE) {
+      const movie = await this.providersService.getMovie(tmdbId);
+      if (!movie) {
+        return { streams: [] };
+      }
+      const streams = await this.providersService.getMovieStreams(movie);
+      return { streams: await this.stremioService.getStreams(streams) };
+    }
+
+    // For series, extract season/episode from ID (format: tt123:1:1)
+    const parts = id.split(':');
+    const season = Number.parseInt(parts[1]) || 1;
+    const episode = Number.parseInt(parts[2]) || 1;
+
+    const series = await this.providersService.getSeries(tmdbId);
+    if (!series) {
+      return { streams: [] };
+    }
+    const streams = await this.providersService.getSeriesStreams(
+      series,
+      season - 1, // Adjust to 0-indexed
+      episode - 1,
+    );
+    return { streams: await this.stremioService.getStreams(streams) };
   }
 
   @Get('/watch/:id')

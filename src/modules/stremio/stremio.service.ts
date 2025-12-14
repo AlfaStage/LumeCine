@@ -92,14 +92,24 @@ export class StremioService {
     return streams.map((stream) => {
       const audio = this.convertAudio(stream.audio);
       const quality = this.convertQuality((stream as MovieStream).quality);
-      const title = [audio, quality].filter(Boolean).join(' - ');
+      const providerName = this.convertProviderName(stream.provider);
+      const description = [audio, quality].filter(Boolean).join(' | ');
 
       return {
-        name: stream.provider,
-        title,
+        name: providerName,
+        description: description || 'Stream disponível',
         url: `${this.envService.get('APP_URL')}/stream/watch/${stream.id}`,
       };
     });
+  }
+
+  public convertProviderName(provider: string): string {
+    const names: Record<string, string> = {
+      REDECANAIS: 'LumeCine | 🎬 RedeCanais',
+      SUPERFLIXAPI: 'LumeCine | ⚡ SuperflixAPI',
+      VIZER: 'LumeCine | 🎥 Vizer',
+    };
+    return names[provider] || `LumeCine | 🎬 ${provider}`;
   }
 
   public async convertMeta(

@@ -11,7 +11,7 @@ import {
 } from '@/modules/tmdb/types/tmdb';
 import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import axios from 'axios';
+import axios, { AxiosInstance } from 'axios';
 
 export type DelegateMedias = Prisma.MovieDelegate & Prisma.SeriesDelegate;
 
@@ -21,7 +21,7 @@ export type DelegateGenres = Prisma.MovieGenreDelegate &
 @Injectable()
 export class TmdbService implements OnModuleInit {
   private readonly logger = new Logger(TmdbService.name);
-  private readonly api;
+  private readonly api: AxiosInstance;
 
   public constructor(
     private readonly envService: EnvService,
@@ -233,6 +233,36 @@ export class TmdbService implements OnModuleInit {
       return null;
     } catch (error) {
       this.logger.error(`Failed to get series details: ${error.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Find TMDB ID from IMDB ID
+   */
+  public async findByImdbId(
+    imdbId: string,
+    type: ContentType,
+  ): Promise<number | null> {
+    try {
+      const params = new URLSearchParams();
+      params.append('external_source', 'imdb_id');
+      params.append('language', 'pt-BR');
+
+      const uri = `find/${imdbId}?${params.toString()}`;
+      const { status, data } = await this.api.get(uri);
+
+      if (status === 200) {
+        if (type === ContentType.MOVIE && data.movie_results?.length > 0) {
+          return data.movie_results[0].id;
+        }
+        if (type === ContentType.TV && data.tv_results?.length > 0) {
+          return data.tv_results[0].id;
+        }
+      }
+      return null;
+    } catch (error) {
+      this.logger.error(`Failed to find by IMDB ID: ${error.message}`);
       return null;
     }
   }

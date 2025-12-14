@@ -21,7 +21,7 @@ export class ManifestController {
       description: packageJson.stremio.description,
       logo: this.envService.get('APP_URL').concat('/public/images/logo.png'),
       resources: ['catalog', 'meta', 'stream'],
-      idPrefixes: ['lumecine'],
+      idPrefixes: ['lumecine', 'tt'],
       types: ['movie', 'series'],
       stremioAddonsConfig: {
         issuer: 'https://stremio-addons.net',
